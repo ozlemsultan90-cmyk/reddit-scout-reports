@@ -1,0 +1,53 @@
+{
+  "content": {
+    "name": "2026-02-27.md",
+    "path": "reports/2026-02-27.md",
+    "sha": "9cf479b3d2baf39abc6eeddbb685424c5f41fe8d",
+    "size": 4938,
+    "url": "https://api.github.com/repos/ozlemsultan90-cmyk/reddit-scout-reports/contents/reports/2026-02-27.md?ref=main",
+    "html_url": "https://github.com/ozlemsultan90-cmyk/reddit-scout-reports/blob/main/reports/2026-02-27.md",
+    "git_url": "https://api.github.com/repos/ozlemsultan90-cmyk/reddit-scout-reports/git/blobs/9cf479b3d2baf39abc6eeddbb685424c5f41fe8d",
+    "download_url": "https://raw.githubusercontent.com/ozlemsultan90-cmyk/reddit-scout-reports/main/reports/2026-02-27.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/ozlemsultan90-cmyk/reddit-scout-reports/contents/reports/2026-02-27.md?ref=main",
+      "git": "https://api.github.com/repos/ozlemsultan90-cmyk/reddit-scout-reports/git/blobs/9cf479b3d2baf39abc6eeddbb685424c5f41fe8d",
+      "html": "https://github.com/ozlemsultan90-cmyk/reddit-scout-reports/blob/main/reports/2026-02-27.md"
+    }
+  },
+  "commit": {
+    "sha": "8b16e1ab8cf9f9e2eab189e2394119b53484ce24",
+    "node_id": "C_kwDORaWFFNoAKDhiMTZlMWFiOGNmOWY5ZTJlYWIxODllMjM5NDExOWI1MzQ4NGNlMjQ",
+    "url": "https://api.github.com/repos/ozlemsultan90-cmyk/reddit-scout-reports/git/commits/8b16e1ab8cf9f9e2eab189e2394119b53484ce24",
+    "html_url": "https://github.com/ozlemsultan90-cmyk/reddit-scout-reports/commit/8b16e1ab8cf9f9e2eab189e2394119b53484ce24",
+    "author": {
+      "name": "ozlemsultan90-cmyk",
+      "email": "ozlemsultan90@gmail.com",
+      "date": "2026-02-27T14:19:25Z"
+    },
+    "committer": {
+      "name": "ozlemsultan90-cmyk",
+      "email": "ozlemsultan90@gmail.com",
+      "date": "2026-02-27T14:19:25Z"
+    },
+    "tree": {
+      "sha": "eda129ad3c0d176876268d619a36c4102b3230f1",
+      "url": "https://api.github.com/repos/ozlemsultan90-cmyk/reddit-scout-reports/git/trees/eda129ad3c0d176876268d619a36c4102b3230f1"
+    },
+    "message": "Update Reddit Scout report for 2026-02-27",
+    "parents": [
+      {
+        "sha": "698e866bf3c7118e0144f8e98512b42af6ff61f9",
+        "url": "https://api.github.com/repos/ozlemsultan90-cmyk/reddit-scout-reports/git/commits/698e866bf3c7118e0144f8e98512b42af6ff61f9",
+        "html_url": "https://github.com/ozlemsultan90-cmyk/reddit-scout-reports/commit/698e866bf3c7118e0144f8e98512b42af6ff61f9"
+      }
+    ],
+    "verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    }
+  }
+}
