@@ -1,226 +1,257 @@
-#!/usr/bin/env node
-
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 const { execSync } = require('child_process');
 
-const SUBREDDITS = [
-  'productivity',
-  'getdisciplined',
-  'DecidingToBeBetter',
-  'StudyTips',
-  'GetStudying'
-];
+const DATE = '2026-03-16';
+const WORKSPACE = '/Users/ozlemsultan/.openclaw/workspace/reddit-productivity';
+const DAILY_DIR = path.join(WORKSPACE, 'daily');
+const MEDIA_DIR = path.join(DAILY_DIR, `${DATE}-media`);
+const REPORTS_DIR = path.join(WORKSPACE, 'reports');
+const REPORT_MEDIA_DIR = path.join(REPORTS_DIR, `${DATE}-media`);
+const TEMP_JSON = path.join(DAILY_DIR, '_temp_posts.json');
 
-const DATE = '2026-03-14';
-const BASE_DIR = __dirname;
-const MEDIA_DIR = path.join(BASE_DIR, 'daily', `${DATE}-media`);
-const REPORT_PATH = path.join(BASE_DIR, 'daily', `${DATE}.md`);
-const TEMP_POSTS_PATH = path.join(BASE_DIR, '_temp_posts.json');
+// Ensure directories
+fs.mkdirSync(MEDIA_DIR, { recursive: true });
+fs.mkdirSync(REPORT_MEDIA_DIR, { recursive: true });
 
-const USER_AGENT = 'RedditScout/1.0 (by u/ozlemsultan)';
-
-async function fetchJSON(url) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT }
-  });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} for ${url}`);
+// Read subreddits
+const subredditsFile = path.join(WORKSPACE, 'subreddits.md');
+const subredditsContent = fs.readFileSync(subredditsFile, 'utf8');
+const subredditNames = [];
+subredditsContent.split('\n').forEach(line => {
+  const match = line.match(/^-\s*r\/([a-zA-Z0-9_]+)/);
+  if (match) {
+    subredditNames.push(match[1]);
   }
-  return res.json();
+});
+const selectedSubs = subredditNames.slice(0, 5);
+console.log(`Using subreddits: ${selectedSubs.join(', ')}`);
+
+// Keywords for relevance
+const KEYWORDS = ['productivity', 'focus', 'screen time', 'gamification', 'phone addiction', 'study', 'discipline', 'digital minimalism', 'streak', 'accountability', 'motivation'];
+
+// Function to fetch JSON from URL (returns Promise)
+function fetchJSON(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          // Extract JSON between "---" and "<<<END" if wrapper present
+          let jsonStr = data;
+          const jsonStart = data.indexOf('---');
+          if (jsonStart !== -1) {
+            const afterDash = data.substring(jsonStart + 3);
+            const jsonEnd = afterDash.indexOf('<<<END');
+            jsonStr = jsonEnd !== -1 ? afterDash.substring(0, jsonEnd).trim() : afterDash.trim();
+          }
+          const parsed = JSON.parse(jsonStr);
+          resolve(parsed);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on('error', reject);
+  });
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+// Function to download image
+function downloadImage(url, dest) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(dest);
+    https.get(url, (response) => {
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve();
+      });
+    }).on('error', (err) => {
+      fs.unlink(dest, () => reject(err));
+    });
+  });
 }
 
+// Main async function
 async function main() {
-  // Ensure media dir exists
-  fs.mkdirSync(MEDIA_DIR, { recursive: true });
-
   let allPosts = [];
-
-  for (let i = 0; i < SUBREDDITS.length; i++) {
-    const sub = SUBREDDITS[i];
+  
+  // Fetch all subreddits
+  for (const sub of selectedSubs) {
     const url = `https://www.reddit.com/r/${sub}/top.json?t=day&limit=5`;
     try {
       const data = await fetchJSON(url);
       const children = data.data?.children || [];
       children.forEach(child => {
-        const post = child.data;
-        post.source_subreddit = sub;
-        allPosts.push(post);
+        allPosts.push(child.data);
       });
       console.log(`Fetched ${children.length} posts from r/${sub}`);
-    } catch (err) {
-      console.error(`Failed to fetch r/${sub}: ${err.message}`);
-      // Continue without this subreddit's posts
-    }
-    // Delay between requests to respect rate limits
-    if (i < SUBREDDITS.length - 1) {
-      await sleep(2000);
-    }
-  }
-
-  // Write raw posts as JSON lines
-  const lines = allPosts.map(post => JSON.stringify(post));
-  fs.writeFileSync(TEMP_POSTS_PATH, lines.join('\n') + '\n');
-  console.log(`Wrote ${allPosts.length} raw posts to ${TEMP_POSTS_PATH}`);
-
-  // Compute viral scores
-  const postsWithScores = allPosts.map(post => {
-    const score = post.score || 0;
-    const comments = post.num_comments || 0;
-    const ratio = post.upvote_ratio || 0;
-    const viral = (score + comments * 2) * ratio;
-    return { ...post, viral_score: viral };
-  });
-
-  // Sort descending by viral_score
-  postsWithScores.sort((a, b) => b.viral_score - a.viral_score);
-
-  const top5 = postsWithScores.slice(0, 5);
-  const top20 = postsWithScores.slice(0, 20);
-
-  console.log(`Top viral score: ${top5[0]?.viral_score}`);
-  console.log(`Threshold (5th): ${top5[4]?.viral_score}`);
-
-  // Download images for top5
-  for (const post of top5) {
-    let imgUrl = null;
-    if (post.domain === 'i.redd.it' && post.url) {
-      imgUrl = post.url;
-    } else if (post.thumbnail && post.thumbnail.startsWith('http')) {
-      imgUrl = post.thumbnail;
-    } else if (post.preview && post.preview.images && post.preview.images.length > 0) {
-      imgUrl = post.preview.images[0].source.url;
-    }
-    if (!imgUrl) continue;
-    // Extract extension
-    let ext = imgUrl.split('.').pop().split('?')[0];
-    if (!ext || ext.includes('/')) ext = 'jpg';
-    const filename = `${post.id}.${ext}`;
-    const filepath = path.join(MEDIA_DIR, filename);
-    try {
-      const imgRes = await fetch(imgUrl, { headers: { 'User-Agent': USER_AGENT } });
-      if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
-      const buffer = await imgRes.buffer();
-      fs.writeFileSync(filepath, buffer);
-      console.log(`Downloaded image for ${post.id} to ${filename}`);
-    } catch (err) {
-      console.error(`Failed to download image for ${post.id}: ${err.message}`);
-    }
-  }
-
-  // Generate report markdown
-  const uniqueSubreddits = new Set(postsWithScores.map(p => p.source_subreddit)).size;
-  const thresholdScore = top5.length === 5 ? top5[4].viral_score : (top5[0] ? top5[0].viral_score : 0);
-
-  let md = `# Reddit Scout Report\n\n`;
-  md += `**Scout:** Reddit Scout\n`;
-  md += `**Date:** ${DATE} (Europe/Istanbul)\n`;
-  md += `**Subreddits fetched:** ${uniqueSubreddits}\n`;
-  md += `**Total posts collected:** ${allPosts.length}\n`;
-  md += `**Top 5 viral threshold score:** ${thresholdScore.toFixed(1)}\n\n`;
-
-  md += `## Top 5 Viral Posts\n\n`;
-  md += `| Rank | Thumbnail | Title/Author | Stats | Link |\n`;
-  md += `|------|-----------|--------------|-------|------|\n`;
-
-  for (let i = 0; i < top5.length; i++) {
-    const post = top5[i];
-    const rank = i + 1;
-    const title = post.title.replace(/\|/g, '\\|');
-    const author = post.author || 'unknown';
-    const score = post.score || 0;
-    const comments = post.num_comments || 0;
-    const ratio = Math.round((post.upvote_ratio || 0) * 100) + '%';
-    const permalink = `https://www.reddit.com${post.permalink}`;
-    // Check if an image file exists for this post in media dir
-    let thumbMarkdown = '';
-    try {
-      const files = fs.readdirSync(MEDIA_DIR);
-      const matched = files.find(f => f.startsWith(post.id + '.'));
-      if (matched) {
-        thumbMarkdown = `![thumb](./${DATE}-media/${matched})`;
-      }
     } catch (e) {
-      // media dir may not exist yet; ignore
+      console.error(`Failed to fetch r/${sub}:`, e.message);
     }
-    const stats = `Upvotes: ${score}\\nComments: ${comments}\\nRatio: ${ratio}`;
-    md += `| ${rank} | ${thumbMarkdown} | **${title}** by u/${author} | ${stats} | [view](${permalink}) |\n`;
   }
-
-  md += `\n## Topics, Themes, Patterns\n\n`;
-
-  // Categorization keywords
-  const categories = {
-    'study hacks': ['hack', 'tip', 'technique', 'method', 'trick', 'cheat', 'strategy', 'advice', 'guide', 'resource', 'improve', 'better', 'productivity', 'study', 'tips', 'how to', 'stop', 'change', 'reflection'],
-    'mental health': ['stress', 'anxiety', 'depression', 'burnout', 'mental', 'therapy', 'emotion', 'feeling', 'mindset', 'self care', 'wellbeing', 'health', 'anger', 'patience', 'losing my mind', 'sobriety', 'friends', 'coworkers', 'joke', 'relationship', 'taking a break', 'dating', 'isolation', 'lonely'],
-    'tools': ['app', 'tool', 'software', 'ai', 'coursology', 'platform', 'flashcard', 'notion', 'digital', 'online', 'website', 'extension', 'service', 'subscription'],
-    'exams': ['exam', 'test', 'final', 'quiz', 'midterm', 'finals', 'revision', 'assessment', 'grade', 'score'],
-    'discipline': ['discipline', 'habit', 'routine', 'consistency', 'procrastination', 'focus', 'concentration', 'productivity', 'time management', 'motivation', 'goal', 'plan', 'schedule', 'body doubling']
-  };
-
-  // Initialize category arrays
-  const categorized = {};
-  for (const cat of Object.keys(categories)) {
-    categorized[cat] = [];
-  }
-
-  // Categorize top20 (first-match)
-  for (const post of top20) {
-    const titleLower = post.title.toLowerCase();
-    for (const [cat, keywords] of Object.entries(categories)) {
-      if (keywords.some(kw => titleLower.includes(kw))) {
-        categorized[cat].push(post);
-        break;
+  
+  // Save raw posts to _temp_posts.json (as array)
+  fs.writeFileSync(TEMP_JSON, JSON.stringify(allPosts, null, 2));
+  console.log(`Raw posts saved to ${TEMP_JSON} (${allPosts.length} total)`);
+  
+  // Process each post: extract fields and calculate viral score
+  const processed = allPosts.map(post => {
+    // Extract fields
+    const title = post.title;
+    const permalink = post.permalink;
+    const subreddit = post.subreddit;
+    const score = post.score;
+    const num_comments = post.num_comments;
+    const upvote_ratio = post.upvote_ratio;
+    const created = post.created;
+    const selftext = post.selftext || '';
+    const selftextExcerpt = selftext.substring(0, 200) + (selftext.length > 200 ? '...' : '');
+    const url = post.url;
+    const post_hint = post.post_hint || null;
+    const is_gallery = post.is_gallery || false;
+    const media_metadata = post.media_metadata || null;
+    const media_sources = [];
+    
+    // Determine if we need to download images and collect URLs
+    let imagesToDownload = [];
+    
+    const hasImageExtension = /\.(jpg|jpeg|png|gif)$/i.test(url);
+    if (post_hint === 'image' && hasImageExtension) {
+      const ext = path.extname(url).split('?')[0] || '.jpg';
+      const filename = `${post.id}${ext}`;
+      imagesToDownload.push({ url, filename });
+    } else if (is_gallery && media_metadata) {
+      const items = post.gallery_data?.items || [];
+      const orderedItems = items.length > 0 ? items : Object.keys(media_metadata).map(k => ({ media_id: k }));
+      orderedItems.forEach((item, idx) => {
+        const meta = media_metadata[item.media_id];
+        if (meta && meta.s && meta.s.u) {
+          const imgUrl = meta.s.u;
+          const ext = path.extname(imgUrl).split('?')[0] || '.jpg';
+          const filename = `${post.id}-${idx}${ext}`;
+          imagesToDownload.push({ url: imgUrl, filename });
+        }
+      });
+    } else if (hasImageExtension) {
+      const ext = path.extname(url).split('?')[0] || '.jpg';
+      const filename = `${post.id}${ext}`;
+      imagesToDownload.push({ url, filename });
+    }
+    
+    // Download images and record paths
+    const downloadedPaths = [];
+    for (const img of imagesToDownload) {
+      const destPath = path.join(MEDIA_DIR, img.filename);
+      try {
+        await downloadImage(img.url, destPath);
+        downloadedPaths.push(`${DATE}-media/${img.filename}`);
+      } catch (e) {
+        console.error(`Failed to download ${img.url} for post ${post.id}:`, e.message);
       }
     }
-  }
-
-  // Add category sections with posts sorted by viral score desc within each
-  for (const [cat, posts] of Object.entries(categorized)) {
-    if (posts.length > 0) {
-      md += `### ${cat}\n`;
-      posts.sort((a,b) => b.viral_score - a.viral_score);
-      for (const p of posts) {
-        md += `- **${p.title}** by u/${p.author} (r/${p.source_subreddit}, Score: ${p.score})\n`;
+    media_sources.push(...downloadedPaths);
+    
+    // Compute viral score
+    const raw = Math.min(score, 5000) / 500;
+    const engagementRaw = (num_comments / (score + 1)) * 100 * 0.03;
+    const engagement = Math.min(engagementRaw, 3);
+    const ratio = upvote_ratio * 10;
+    const text = (title + ' ' + selftext).toLowerCase();
+    let relevanceCount = 0;
+    const foundKeywords = new Set();
+    for (const kw of KEYWORDS) {
+      if (text.includes(kw.toLowerCase()) && !foundKeywords.has(kw)) {
+        foundKeywords.add(kw);
+        relevanceCount++;
       }
-      md += `\n`;
     }
+    relevanceCount = Math.min(relevanceCount, 3);
+    const total = raw + engagement + ratio + relevanceCount;
+    const viral_score = Math.round(total * 10 / 2.6) / 10; // round to 1 decimal
+    
+    return {
+      title,
+      permalink,
+      subreddit,
+      score,
+      num_comments,
+      upvote_ratio,
+      created,
+      selftextExcerpt,
+      url,
+      media_sources,
+      viral_score
+    };
+  });
+  
+  // Sort descending by viral_score
+  processed.sort((a, b) => b.viral_score - a.viral_score);
+  
+  // Take top 5
+  const top5 = processed.slice(0, 5);
+  
+  // Generate markdown report
+  const generatedStr = `${DATE} 17:00 UTC (Europe/Istanbul 20:00)`;
+  
+  let report = `# Reddit Trending Posts for Focus Timer — ${DATE}\n\n`;
+  report += `**Scout:** OpenClaw (v0.1)\n`;
+  report += `**Generated:** ${generatedStr}\n`;
+  report += `**Sources:** ${selectedSubs.join(', ')} (top 5 of past 24h each)\n\n`;
+  report += `### Top 5 Viral Posts\n\n`;
+  
+  top5.forEach((post, index) => {
+    const rank = index + 1;
+    const scoreFormatted = post.score >= 1000 ? (post.score/1000).toFixed(1) + 'k' : post.score;
+    const commentsFormatted = post.num_comments >= 1000 ? (post.num_comments/1000).toFixed(1) + 'k' : post.num_comments;
+    const upvotePercent = Math.round(post.upvote_ratio * 100) + '%';
+    
+    let thumbLine = '';
+    if (post.media_sources && post.media_sources.length > 0) {
+      thumbLine = `![Thumb](${post.media_sources[0]})\n`;
+    }
+    
+    const fullPermalink = `https://www.reddit.com${post.permalink}`;
+    
+    report += `${rank}. **[${post.viral_score.toFixed(1)}]** "${post.title}" (r/${post.subreddit})\n`;
+    report += `   Score: ${scoreFormatted} | Comments: ${commentsFormatted} | Upvote: ${upvotePercent}\n`;
+    if (thumbLine) report += `   ${thumbLine}`;
+    report += `   <${fullPermalink}>\n`;
+    if (post.selftextExcerpt) {
+      report += `   > ${post.selftextExcerpt}\n`;
+    } else {
+      report += `   > (no selftext)\n`;
+    }
+    report += '\n';
+  });
+  
+  // Write report to daily folder
+  const dailyReportPath = path.join(DAILY_DIR, `${DATE}.md`);
+  fs.writeFileSync(dailyReportPath, report);
+  console.log(`Report written to ${dailyReportPath}`);
+  
+  // Copy report and media to reports folder
+  const reportPathDest = path.join(REPORTS_DIR, `${DATE}.md`);
+  fs.writeFileSync(reportPathDest, report);
+  // Copy media files
+  const mediaFiles = fs.readdirSync(MEDIA_DIR);
+  for (const file of mediaFiles) {
+    fs.copyFileSync(path.join(MEDIA_DIR, file), path.join(REPORT_MEDIA_DIR, file));
   }
-
-  // All Posts Sorted by Viral Score (top 20) table
-  md += `## All Posts Sorted by Viral Score (top 20)\n\n`;
-  md += `| Rank | Title | Author | Subreddit | Score | Comments | Viral |\n`;
-  md += `|------|-------|--------|-----------|-------|----------|-------|\n`;
-
-  for (let i = 0; i < top20.length; i++) {
-    const post = top20[i];
-    const rank = i + 1;
-    const title = post.title.replace(/\|/g, '\\|');
-    const author = post.author || 'unknown';
-    const sub = post.source_subreddit;
-    const score = post.score || 0;
-    const comments = post.num_comments || 0;
-    const viral = post.viral_score ? post.viral_score.toFixed(1) : '0.0';
-    md += `| ${rank} | ${title} | u/${author} | r/${sub} | ${score} | ${comments} | ${viral} |\n`;
-  }
-
-  // Write report
-  fs.writeFileSync(REPORT_PATH, md);
-  console.log(`Report written to ${REPORT_PATH}`);
-
-  // Git commit and push
+  
+  // Git add, commit, push
   try {
-    execSync('git add .', { cwd: BASE_DIR, stdio: 'inherit' });
-    execSync(`git commit -m "Scout report ${DATE}"`, { cwd: BASE_DIR, stdio: 'inherit' });
-    execSync('git push origin main', { cwd: BASE_DIR, stdio: 'inherit' });
+    execSync('git add -A', { cwd: WORKSPACE, stdio: 'inherit' });
+    execSync(`git commit -m "Reddit scout report ${DATE}"`, { cwd: WORKSPACE, stdio: 'inherit' });
+    execSync('git push', { cwd: WORKSPACE, stdio: 'inherit' });
     console.log('Git push completed.');
-  } catch (err) {
-    console.error('Git operation failed:', err.message);
+  } catch (e) {
+    console.error('Git operations failed:', e.message);
   }
+  
+  // Output report to stdout for cron delivery
+  console.log('\n' + report);
 }
 
 main().catch(err => {
